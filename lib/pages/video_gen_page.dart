@@ -42,7 +42,6 @@ class _VideoGenPageState extends State<VideoGenPage> {
 
   bool _isSubmitting = false;
   String _taskStatus = '';
-  String? _videoUrl;
   String? _savedLocalPath;
   Timer? _pollTimer;
 
@@ -90,7 +89,6 @@ class _VideoGenPageState extends State<VideoGenPage> {
     setState(() {
       _isSubmitting = true;
       _taskStatus = '正在准备多模态素材并提交任务...';
-      _videoUrl = null;
       _savedLocalPath = null;
     });
 
@@ -170,7 +168,6 @@ class _VideoGenPageState extends State<VideoGenPage> {
 
           setState(() {
             _taskStatus = '🎉 视频生成完成！正在自动保存至本地 AIGenStudio 目录...';
-            _videoUrl = downloadUrl;
           });
 
           // 自动下载并保存到本地专属目录
