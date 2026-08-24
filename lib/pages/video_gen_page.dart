@@ -26,7 +26,6 @@ class _VideoGenPageState extends State<VideoGenPage> {
   String? _refImageName;
 
   bool _isSubmitting = false;
-  String _taskId = '';
   String _taskStatus = '';
   String? _videoUrl;
   Timer? _pollTimer;
@@ -67,7 +66,6 @@ class _VideoGenPageState extends State<VideoGenPage> {
       _isSubmitting = true;
       _taskStatus = '正在提交任务...';
       _videoUrl = null;
-      _taskId = '';
     });
 
     try {
@@ -100,7 +98,6 @@ class _VideoGenPageState extends State<VideoGenPage> {
       );
 
       setState(() {
-        _taskId = taskId;
         _taskStatus = '任务已提交 (ID: $taskId)，正在排队生成...';
       });
 

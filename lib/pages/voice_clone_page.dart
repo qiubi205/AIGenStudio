@@ -1,7 +1,5 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../services/minimax_service.dart';
 import '../services/app_storage.dart';
@@ -28,20 +26,12 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
   String _statusMessage = '';
 
   final AudioPlayer _audioPlayer = AudioPlayer();
-  bool _isPlaying = false;
   List<ClonedVoice> _savedVoices = [];
 
   @override
   void initState() {
     super.initState();
     _loadSavedVoices();
-    _audioPlayer.onPlayerStateChanged.listen((state) {
-      if (mounted) {
-        setState(() {
-          _isPlaying = state == PlayerState.playing;
-        });
-      }
-    });
   }
 
   Future<void> _loadSavedVoices() async {
@@ -112,7 +102,7 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
 
       // 2. 提交音色复刻
       final previewText = _previewTextController.text.trim();
-      final cloneResult = await service.cloneVoice(
+      await service.cloneVoice(
         fileId: fileId,
         voiceId: voiceId,
         previewText: previewText.isNotEmpty ? previewText : null,
