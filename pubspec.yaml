@@ -1,0 +1,25 @@
+name: aigen_studio
+description: "AIGenStudio - AI 语音克隆、TTS 与视频生成工坊"
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  path_provider: ^2.1.2
+  share_plus: ^10.1.4
+  file_picker: ^10.3.10
+  audioplayers: ^6.1.0
+  shared_preferences: ^2.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
