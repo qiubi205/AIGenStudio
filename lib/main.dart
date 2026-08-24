@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'pages/voice_clone_page.dart';
 import 'pages/tts_page.dart';
 import 'pages/video_gen_page.dart';
+import 'pages/history_page.dart';
 import 'pages/settings_page.dart';
-import 'services/app_storage.dart';
+import 'services/storage_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,31 +42,42 @@ class MainHomePage extends StatefulWidget {
 class _MainHomePageState extends State<MainHomePage> {
   int _currentIndex = 0;
   final GlobalKey<TTSPageState> _ttsPageKey = GlobalKey<TTSPageState>();
+  final GlobalKey<HistoryPageState> _historyPageKey = GlobalKey<HistoryPageState>();
 
   @override
   void initState() {
     super.initState();
-    _checkInitialKey();
+    _initAppStorage();
   }
 
-  Future<void> _checkInitialKey() async {
-    final key = await AppStorage.getApiKey();
-    if (key.isEmpty) {
-      // 首次使用如果发现 videogen 中有现成 key，自动导入
-      // 方便用户开箱即用
-    }
+  Future<void> _initAppStorage() async {
+    // 首次启动申请存储权限并建立 AIGenStudio 根目录
+    await StorageService.requestStoragePermission();
+    await StorageService.getAppOutputDirectory();
+  }
+
+  void _onWorkGenerated() {
+    _historyPageKey.currentState?.loadWorks();
   }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
-      TTSPage(key: _ttsPageKey),
+      TTSPage(
+        key: _ttsPageKey,
+        onWorkCreated: _onWorkGenerated,
+      ),
       VoiceClonePage(
         onVoiceCreated: () {
           _ttsPageKey.currentState?.loadCustomVoices();
         },
       ),
-      const VideoGenPage(),
+      VideoGenPage(
+        onWorkCreated: _onWorkGenerated,
+      ),
+      HistoryPage(
+        key: _historyPageKey,
+      ),
       const SettingsPage(),
     ];
 
@@ -100,6 +112,9 @@ class _MainHomePageState extends State<MainHomePage> {
           setState(() {
             _currentIndex = index;
           });
+          if (index == 3) {
+            _historyPageKey.currentState?.loadWorks();
+          }
         },
         destinations: const [
           NavigationDestination(
@@ -115,7 +130,12 @@ class _MainHomePageState extends State<MainHomePage> {
           NavigationDestination(
             icon: Icon(Icons.video_library_outlined),
             selectedIcon: Icon(Icons.video_library),
-            label: '视频创作',
+            label: '视频工坊',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.folder_outlined),
+            selectedIcon: Icon(Icons.folder),
+            label: '历史作品',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),

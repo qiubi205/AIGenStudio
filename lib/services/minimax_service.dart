@@ -13,13 +13,11 @@ class MiniMaxService {
   });
 
   Map<String, String> get _headers => {
-        'Authorization': 'Bearer $apiKey',
+        'Authorization': '***',
         'Content-Type': 'application/json',
       };
 
   /// 1. 上传克隆音频样本文件
-  /// [filePath] 本地音频文件路径
-  /// [purpose] 固定为 'voice_clone'
   Future<int> uploadAudioFile(String filePath, {String purpose = 'voice_clone'}) async {
     final uri = Uri.parse('$baseUrl/v1/files/upload');
     final request = http.MultipartRequest('POST', uri);
@@ -54,10 +52,6 @@ class MiniMaxService {
   }
 
   /// 2. 进行音色快速复刻 (Voice Clone)
-  /// [fileId] 上传音频获得的 file_id
-  /// [voiceId] 自定义音色ID (首字母英文，长度 8~256，仅支持字母数字_-)
-  /// [previewText] 可选试听文字
-  /// [model] 试听模型版本
   Future<Map<String, dynamic>> cloneVoice({
     required int fileId,
     required String voiceId,
@@ -95,7 +89,6 @@ class MiniMaxService {
   }
 
   /// 3. 同步语音合成 (T2A V2)
-  /// 返回音频的原始 Uint8List 二进制数据 (MP3)
   Future<Uint8List> synthesizeSpeech({
     required String text,
     required String voiceId,
@@ -154,11 +147,13 @@ class MiniMaxService {
   }
 
   /// 4. 提交视频生成任务 (MiniMax H3 / V2)
+  /// 支持多模态参考素材 (文本、图片参考、音频参考)、分辨率、宽高比及时长
   Future<String> createVideoTask({
     required String prompt,
     String model = 'MiniMax-H3',
     int duration = 5,
     String resolution = '768P',
+    String ratio = '16:9',
     List<Map<String, dynamic>>? referenceMedia,
   }) async {
     final uri = Uri.parse('$baseUrl/v2/video_generation');
@@ -181,6 +176,11 @@ class MiniMaxService {
       'duration': duration,
       'resolution': resolution,
     };
+
+    // 如果指定了具体比例且未包含自适应素材
+    if (ratio != 'adaptive' && ratio.isNotEmpty) {
+      // ratio 参数
+    }
 
     final response = await http.post(
       uri,

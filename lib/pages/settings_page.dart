@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/app_storage.dart';
+import '../services/storage_service.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -12,6 +13,7 @@ class _SettingsPageState extends State<SettingsPage> {
   final _apiKeyController = TextEditingController();
   final _baseUrlController = TextEditingController();
   bool _obscureKey = true;
+  String _folderPath = '/sdcard/AIGenStudio';
 
   @override
   void initState() {
@@ -22,9 +24,11 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     final key = await AppStorage.getApiKey();
     final url = await AppStorage.getBaseUrl();
+    final dir = await StorageService.getAppOutputDirectory();
     setState(() {
       _apiKeyController.text = key;
       _baseUrlController.text = url;
+      _folderPath = dir.path;
     });
   }
 
@@ -86,7 +90,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   const Text('MiniMax API Key *', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
-                  const Text('在 MiniMax 开放平台获取的 API Secret Key', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const Text('在 MiniMax 开放平台获取的 API Secret Key（音视频通用）', style: TextStyle(fontSize: 12, color: Colors.grey)),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _apiKeyController,
@@ -137,6 +141,56 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 16),
 
+          // 存储与文件管理卡片
+          Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.folder_special, color: Colors.blue),
+                      SizedBox(width: 8),
+                      Text('成果存储目录', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const Divider(height: 16),
+                  const Text('所有生成的 TTS 音频和 MiniMax 视频均会自动持久化保存在以下设备目录中：', style: TextStyle(fontSize: 12, color: Colors.black87)),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _folderPath,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.indigo),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final granted = await StorageService.requestStoragePermission();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(granted ? '已授予存储访问权限！' : '未能获取完全存储权限，请检查系统设置')),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.security),
+                    label: const Text('重新检查并申请存储权限'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
           Card(
             elevation: 2,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -147,11 +201,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 children: [
                   Text('关于 AIGenStudio', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   Divider(height: 16),
-                  Text('版本: v0.1.0 (Release)', style: TextStyle(fontSize: 13)),
+                  Text('版本: v0.2.0 (Release)', style: TextStyle(fontSize: 13)),
                   SizedBox(height: 6),
-                  Text('支持能力: 音色克隆、TTS 文本朗读、MiniMax H3 视频生成', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                  Text('功能特性: 音色复刻、TTS 语音合成、MiniMax H3 多模态视频、成果自动归档与作品库管理。', style: TextStyle(fontSize: 13, color: Colors.grey)),
                   SizedBox(height: 6),
-                  Text('所有 API Key 和克隆数据均保存在本地设备中。', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                  Text('所有本地数据均储存在手机中，安全私密。', style: TextStyle(fontSize: 13, color: Colors.grey)),
                 ],
               ),
             ),

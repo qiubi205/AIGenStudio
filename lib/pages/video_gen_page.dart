@@ -5,12 +5,27 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 import '../services/minimax_service.dart';
 import '../services/app_storage.dart';
+import '../services/storage_service.dart';
+
+class MediaAsset {
+  final String path;
+  final String name;
+  final String type; // 'image_url' or 'audio_url'
+  final String role; // 'reference_image', 'first_frame', 'last_frame', 'reference_audio'
+
+  MediaAsset({
+    required this.path,
+    required this.name,
+    required this.type,
+    required this.role,
+  });
+}
 
 class VideoGenPage extends StatefulWidget {
-  const VideoGenPage({super.key});
+  final VoidCallback? onWorkCreated;
+  const VideoGenPage({super.key, this.onWorkCreated});
 
   @override
   State<VideoGenPage> createState() => _VideoGenPageState();
@@ -21,14 +36,18 @@ class _VideoGenPageState extends State<VideoGenPage> {
   String _selectedModel = 'MiniMax-H3';
   int _duration = 5;
   String _resolution = '768P';
+  String _aspectRatio = '16:9';
 
-  String? _refImagePath;
-  String? _refImageName;
+  final List<MediaAsset> _mediaAssets = [];
 
   bool _isSubmitting = false;
   String _taskStatus = '';
   String? _videoUrl;
+  String? _savedLocalPath;
   Timer? _pollTimer;
+
+  final List<String> _resolutions = ['768P', '1080P'];
+  final List<String> _ratios = ['16:9', '9:16', '1:1', 'adaptive'];
 
   @override
   void dispose() {
@@ -37,14 +56,20 @@ class _VideoGenPageState extends State<VideoGenPage> {
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
+  Future<void> _pickMedia(String kind) async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
+      type: kind == 'image' ? FileType.image : FileType.audio,
     );
     if (result != null && result.files.single.path != null) {
+      final path = result.files.single.path!;
+      final name = result.files.single.name;
       setState(() {
-        _refImagePath = result.files.single.path;
-        _refImageName = result.files.single.name;
+        _mediaAssets.add(MediaAsset(
+          path: path,
+          name: name,
+          type: kind == 'image' ? 'image_url' : 'audio_url',
+          role: kind == 'image' ? 'reference_image' : 'reference_audio',
+        ));
       });
     }
   }
@@ -64,8 +89,9 @@ class _VideoGenPageState extends State<VideoGenPage> {
 
     setState(() {
       _isSubmitting = true;
-      _taskStatus = '正在提交任务...';
+      _taskStatus = '正在准备多模态素材并提交任务...';
       _videoUrl = null;
+      _savedLocalPath = null;
     });
 
     try {
@@ -73,20 +99,34 @@ class _VideoGenPageState extends State<VideoGenPage> {
       final service = MiniMaxService(apiKey: apiKey, baseUrl: baseUrl);
 
       List<Map<String, dynamic>>? referenceMedia;
-      if (_refImagePath != null) {
-        final bytes = await File(_refImagePath!).readAsBytes();
-        final b64 = base64Encode(bytes);
-        final ext = _refImagePath!.split('.').last.toLowerCase();
-        final mime = ext == 'png' ? 'image/png' : 'image/jpeg';
-        final dataUri = 'data:$mime;base64,$b64';
-
-        referenceMedia = [
-          {
-            'type': 'image_url',
-            'image_url': {'url': dataUri},
-            'role': 'reference_image',
+      if (_mediaAssets.isNotEmpty) {
+        referenceMedia = [];
+        for (final asset in _mediaAssets) {
+          final file = File(asset.path);
+          final bytes = await file.readAsBytes();
+          final b64 = base64Encode(bytes);
+          final ext = asset.name.split('.').last.toLowerCase();
+          
+          String mime = 'image/jpeg';
+          if (asset.type == 'image_url') {
+            if (ext == 'png') mime = 'image/png';
+            if (ext == 'webp') mime = 'image/webp';
+            referenceMedia.add({
+              'type': 'image_url',
+              'image_url': {'url': 'data:$mime;base64,$b64'},
+              'role': asset.role,
+            });
+          } else {
+            if (ext == 'mp3') mime = 'audio/mpeg';
+            if (ext == 'wav') mime = 'audio/wav';
+            if (ext == 'm4a') mime = 'audio/mp4';
+            referenceMedia.add({
+              'type': 'audio_url',
+              'audio_url': {'url': 'data:$mime;base64,$b64'},
+              'role': asset.role,
+            });
           }
-        ];
+        }
       }
 
       final taskId = await service.createVideoTask(
@@ -94,6 +134,7 @@ class _VideoGenPageState extends State<VideoGenPage> {
         model: _selectedModel,
         duration: _duration,
         resolution: _resolution,
+        ratio: _aspectRatio,
         referenceMedia: referenceMedia,
       );
 
@@ -101,7 +142,7 @@ class _VideoGenPageState extends State<VideoGenPage> {
         _taskStatus = '任务已提交 (ID: $taskId)，正在排队生成...';
       });
 
-      _startPolling(service, taskId);
+      _startPolling(service, taskId, prompt);
     } catch (e) {
       setState(() {
         _taskStatus = '❌ 提交失败: $e';
@@ -111,7 +152,7 @@ class _VideoGenPageState extends State<VideoGenPage> {
     }
   }
 
-  void _startPolling(MiniMaxService service, String taskId) {
+  void _startPolling(MiniMaxService service, String taskId, String prompt) {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
       try {
@@ -128,9 +169,17 @@ class _VideoGenPageState extends State<VideoGenPage> {
           }
 
           setState(() {
-            _isSubmitting = false;
-            _taskStatus = '🎉 视频生成完成！';
+            _taskStatus = '🎉 视频生成完成！正在自动保存至本地 AIGenStudio 目录...';
             _videoUrl = downloadUrl;
+          });
+
+          // 自动下载并保存到本地专属目录
+          if (downloadUrl != null) {
+            await _autoSaveVideo(downloadUrl, prompt, taskId);
+          }
+
+          setState(() {
+            _isSubmitting = false;
           });
         } else if (status == 'failed' || status == 'FAILED' || status == 'Fail') {
           timer.cancel();
@@ -143,24 +192,50 @@ class _VideoGenPageState extends State<VideoGenPage> {
             _taskStatus = '⏳ 正在生成中... (状态: $status)';
           });
         }
-      } catch (e) {
-        // 网络抖动重试
-      }
+      } catch (_) {}
     });
   }
 
-  Future<void> _downloadAndShareVideo() async {
-    if (_videoUrl == null) return;
+  Future<void> _autoSaveVideo(String url, String prompt, String taskId) async {
     try {
-      _showMsg('正在下载视频...');
-      final resp = await http.get(Uri.parse(_videoUrl!));
-      final tempDir = await getTemporaryDirectory();
-      final file = File('${tempDir.path}/video_${DateTime.now().millisecondsSinceEpoch}.mp4');
-      await file.writeAsBytes(resp.bodyBytes);
-      _showMsg('视频已下载，正在调起分享...');
-      await Share.shareXFiles([XFile(file.path)], text: '由 AIGenStudio 生成的视频');
+      final resp = await http.get(Uri.parse(url));
+      final filename = 'video_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      final savedFile = await StorageService.saveMediaFile(
+        bytes: resp.bodyBytes,
+        filename: filename,
+        subFolder: 'videos',
+      );
+
+      final work = WorkItem(
+        id: 'work_vid_$taskId',
+        title: prompt.length > 20 ? '${prompt.substring(0, 20)}...' : prompt,
+        description: '模型: $_selectedModel, 分辨率: $_resolution, 时长: ${_duration}s',
+        filePath: savedFile.path,
+        remoteUrl: url,
+        kind: MediaKind.video,
+        createdAt: DateTime.now(),
+        metadata: {
+          'prompt': prompt,
+          'duration': _duration,
+          'resolution': _resolution,
+        },
+      );
+
+      await AppStorage.addWorkItem(work);
+      widget.onWorkCreated?.call();
+
+      if (mounted) {
+        setState(() {
+          _savedLocalPath = savedFile.path;
+          _taskStatus = '🎉 视频生成完成并已存入作品库: ${savedFile.path}';
+        });
+      }
     } catch (e) {
-      _showMsg('下载/分享失败: $e');
+      if (mounted) {
+        setState(() {
+          _taskStatus = '🎉 视频已生成，但本地保存失败: $e';
+        });
+      }
     }
   }
 
@@ -195,7 +270,7 @@ class _VideoGenPageState extends State<VideoGenPage> {
                       ),
                       const SizedBox(width: 12),
                       const Text(
-                        'AI 视频生成 (MiniMax H3)',
+                        'AI 视频生成工坊 (MiniMax H3)',
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                     ],
@@ -216,67 +291,77 @@ class _VideoGenPageState extends State<VideoGenPage> {
                   ),
                   const SizedBox(height: 16),
 
-                  // 2. 参考图 (图生视频 / 角色参考)
-                  const Text('2. 参考图片 (可选)', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  InkWell(
-                    onTap: _isSubmitting ? null : _pickImage,
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade400),
-                        borderRadius: BorderRadius.circular(12),
-                        color: _refImagePath != null ? Colors.purple.withOpacity(0.05) : null,
-                      ),
-                      child: Row(
+                  // 2. 多模态素材 (参考图片 / 参考音频)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('2. 多模态参考素材 (可选)', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Row(
                         children: [
-                          Icon(Icons.image, color: Theme.of(context).colorScheme.primary),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              _refImageName ?? '点击添加参考图片 (用于图生视频或保持角色一致)',
-                              style: TextStyle(
-                                color: _refImagePath != null ? Colors.black87 : Colors.grey,
-                                fontWeight: _refImagePath != null ? FontWeight.w500 : FontWeight.normal,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.image, size: 18),
+                            label: const Text('参考图', style: TextStyle(fontSize: 12)),
+                            onPressed: _isSubmitting ? null : () => _pickMedia('image'),
                           ),
-                          if (_refImagePath != null)
-                            IconButton(
-                              icon: const Icon(Icons.clear, size: 18),
-                              onPressed: () => setState(() {
-                                _refImagePath = null;
-                                _refImageName = null;
-                              }),
-                            ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.audiotrack, size: 18),
+                            label: const Text('参考音频', style: TextStyle(fontSize: 12)),
+                            onPressed: _isSubmitting ? null : () => _pickMedia('audio'),
+                          ),
                         ],
                       ),
-                    ),
+                    ],
                   ),
+                  if (_mediaAssets.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Text(
+                        '暂无素材。点击右上角按钮可添加图片（用于图生视频/主体参考）或音频（用于音频驱动视频生成）。',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    )
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _mediaAssets.map((asset) {
+                        final isImage = asset.type == 'image_url';
+                        return Chip(
+                          avatar: Icon(isImage ? Icons.image : Icons.audiotrack, size: 16),
+                          label: Text('${asset.name} (${isImage ? "图" : "音频"})', style: const TextStyle(fontSize: 11)),
+                          onDeleted: _isSubmitting
+                              ? null
+                              : () => setState(() => _mediaAssets.remove(asset)),
+                        );
+                      }).toList(),
+                    ),
                   const SizedBox(height: 16),
 
-                  // 3. 模型与时长
+                  // 3. 模型与分辨率、画幅、时长
                   Row(
                     children: [
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('模型', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const Text('清晰度', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                             const SizedBox(height: 6),
                             DropdownButtonFormField<String>(
-                              value: _selectedModel,
+                              value: _resolution,
                               isDense: true,
                               decoration: InputDecoration(
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                               ),
-                              items: const [
-                                DropdownMenuItem(value: 'MiniMax-H3', child: Text('MiniMax-H3 (推荐)', style: TextStyle(fontSize: 12))),
-                              ],
-                              onChanged: (v) => setState(() => _selectedModel = v!),
+                              items: _resolutions
+                                  .map((r) => DropdownMenuItem(value: r, child: Text(r, style: const TextStyle(fontSize: 12))))
+                                  .toList(),
+                              onChanged: (v) => setState(() => _resolution = v!),
                             ),
                           ],
                         ),
@@ -286,7 +371,29 @@ class _VideoGenPageState extends State<VideoGenPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('视频时长', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const Text('画幅比例', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(height: 6),
+                            DropdownButtonFormField<String>(
+                              value: _aspectRatio,
+                              isDense: true,
+                              decoration: InputDecoration(
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              ),
+                              items: _ratios
+                                  .map((r) => DropdownMenuItem(value: r, child: Text(r, style: const TextStyle(fontSize: 12))))
+                                  .toList(),
+                              onChanged: (v) => setState(() => _aspectRatio = v!),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('时长', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                             const SizedBox(height: 6),
                             DropdownButtonFormField<int>(
                               value: _duration,
@@ -306,7 +413,7 @@ class _VideoGenPageState extends State<VideoGenPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
 
                   // 提交按钮
                   SizedBox(
@@ -351,8 +458,8 @@ class _VideoGenPageState extends State<VideoGenPage> {
           ),
           const SizedBox(height: 16),
 
-          // 结果展示与下载
-          if (_videoUrl != null)
+          // 结果展示与分享
+          if (_savedLocalPath != null)
             Card(
               elevation: 2,
               color: Colors.blue.shade50,
@@ -366,23 +473,23 @@ class _VideoGenPageState extends State<VideoGenPage> {
                       children: [
                         Icon(Icons.check_circle, color: Colors.green),
                         SizedBox(width: 8),
-                        Text('视频已就绪', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text('视频已存入成果库', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Text(
-                      '下载链接: $_videoUrl',
+                      '文件路径: $_savedLocalPath',
                       style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        icon: const Icon(Icons.download),
-                        label: const Text('下载并保存/分享视频 (MP4)'),
-                        onPressed: _downloadAndShareVideo,
+                        icon: const Icon(Icons.share),
+                        label: const Text('分享 / 发送视频'),
+                        onPressed: () {
+                          Share.shareXFiles([XFile(_savedLocalPath!)], text: '由 AIGenStudio 生成的视频');
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green,
                           foregroundColor: Colors.white,

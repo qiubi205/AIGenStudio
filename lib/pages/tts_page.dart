@@ -1,13 +1,14 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../services/minimax_service.dart';
 import '../services/app_storage.dart';
+import '../services/storage_service.dart';
 
 class TTSPage extends StatefulWidget {
-  const TTSPage({super.key});
+  final VoidCallback? onWorkCreated;
+  const TTSPage({super.key, this.onWorkCreated});
 
   @override
   State<TTSPage> createState() => TTSPageState();
@@ -84,7 +85,6 @@ class TTSPageState extends State<TTSPage> {
       setState(() {
         _customVoices = list;
         if (list.isNotEmpty && _selectedVoiceId == 'male-qn-qingse') {
-          // 默认选中第一个自定义音色
           _selectedVoiceId = list.first.voiceId;
           _selectedVoiceName = '${list.first.name} (我的克隆)';
         }
@@ -131,18 +131,38 @@ class TTSPageState extends State<TTSPage> {
         emotion: _selectedEmotion,
       );
 
-      final tempDir = await getTemporaryDirectory();
+      // 保存至 AIGenStudio 专用目录
       final filename = 'tts_${DateTime.now().millisecondsSinceEpoch}.mp3';
-      final file = File('${tempDir.path}/$filename');
-      await file.writeAsBytes(audioBytes);
+      final savedFile = await StorageService.saveMediaFile(
+        bytes: audioBytes,
+        filename: filename,
+        subFolder: 'audios',
+      );
+
+      // 录入历史作品
+      final work = WorkItem(
+        id: 'work_tts_${DateTime.now().millisecondsSinceEpoch}',
+        title: text.length > 20 ? '${text.substring(0, 20)}...' : text,
+        description: '音色: $_selectedVoiceName, 模型: $_selectedModel, 情绪: $_selectedEmotion',
+        filePath: savedFile.path,
+        kind: MediaKind.audio,
+        createdAt: DateTime.now(),
+        metadata: {
+          'text': text,
+          'voiceId': _selectedVoiceId,
+          'speed': _speed,
+        },
+      );
+      await AppStorage.addWorkItem(work);
+      widget.onWorkCreated?.call();
 
       setState(() {
-        _lastGeneratedAudioPath = file.path;
-        _statusMsg = '🎉 语音生成成功 (${(audioBytes.length / 1024).toStringAsFixed(1)} KB)';
+        _lastGeneratedAudioPath = savedFile.path;
+        _statusMsg = '🎉 语音已生成并保存至 AIGenStudio 目录 (${(audioBytes.length / 1024).toStringAsFixed(1)} KB)';
       });
 
       // 自动播放
-      await _playAudio(file.path);
+      await _playAudio(savedFile.path);
     } catch (e) {
       setState(() {
         _statusMsg = '❌ 生成失败: $e';
@@ -436,8 +456,8 @@ class TTSPageState extends State<TTSPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('最新生成的音频', style: TextStyle(fontWeight: FontWeight.bold)),
-                          Text('点击左侧播放，或分享/保存到外部', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                          Text('最新生成的音频 (已存入作品库)', style: TextStyle(fontWeight: FontWeight.bold)),
+                          Text('可在"历史作品"中随时回顾与批量管理', style: TextStyle(fontSize: 11, color: Colors.grey)),
                         ],
                       ),
                     ),

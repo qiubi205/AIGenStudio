@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:audioplayers/audioplayers.dart';
 import '../services/minimax_service.dart';
 import '../services/app_storage.dart';
 
@@ -25,7 +24,6 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
   bool _isProcessing = false;
   String _statusMessage = '';
 
-  final AudioPlayer _audioPlayer = AudioPlayer();
   List<ClonedVoice> _savedVoices = [];
 
   @override
@@ -48,7 +46,6 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
     _voiceIdController.dispose();
     _nameController.dispose();
     _previewTextController.dispose();
-    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -119,6 +116,7 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
         voiceId: voiceId,
         name: name,
         createdAt: DateTime.now(),
+        sampleAudioPath: _selectedAudioPath,
       );
       await AppStorage.saveClonedVoice(cloned);
       await _loadSavedVoices();
@@ -194,7 +192,7 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
                       decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey.shade400, style: BorderStyle.solid),
                         borderRadius: BorderRadius.circular(12),
-                        color: _selectedAudioPath != null ? Colors.blue.withOpacity(0.05) : null,
+                        color: _selectedAudioPath != null ? Colors.blue.withValues(alpha: 0.05) : null,
                       ),
                       child: Row(
                         children: [
